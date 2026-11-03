@@ -3,7 +3,8 @@ import unittest
 from email.message import EmailMessage
 from email.policy import SMTP
 
-from free_protonmail_mcp.mail import MAX_TEXT_BYTES, MailClient
+import free_protonmail_mcp.mail as mail_module
+from free_protonmail_mcp.mail import MAX_TEXT_BYTES, MailClient, _draft_matches
 from free_protonmail_mcp.models import (
     AccountConfig,
     MailError,
@@ -166,6 +167,45 @@ class MailClientTests(unittest.TestCase):
         self.assertNotIn("2.1", self.server.body_fetch_sections)
         self.assertNotIn("2.2", self.server.body_fetch_sections)
 
+    def test_draft_match_accepts_server_stripped_trailing_newline(self):
+        outgoing = OutgoingMessage(to=("to@example.test",), subject="S", body="Body")
+        verified = {
+            "subject": "S",
+            "to": ["to@example.test"],
+            "cc": [],
+            "bcc": [],
+            "body": "Body",
+            "flags": ["\\Draft"],
+        }
+
+        self.assertTrue(_draft_matches(verified, outgoing))
+
+        verified["body"] = "Body changed"
+        self.assertFalse(_draft_matches(verified, outgoing))
+
+    def test_nil_header_section_is_retried_before_reading(self):
+        self.addCleanup(setattr, mail_module, "SETTLE_DELAY_SECONDS", 2.0)
+        mail_module.SETTLE_DELAY_SECONDS = 0
+        ref = self.make_message("<nil-header-retry@example.test>")
+        self.server.nil_header_fetches = 1
+
+        result = self.client.read_message(ref)
+
+        self.assertEqual(result["message_id"], ref.message_id)
+        self.assertEqual(self.server.nil_header_fetches, 0)
+
+    def test_persistent_nil_header_is_not_reported_as_missing(self):
+        self.addCleanup(setattr, mail_module, "SETTLE_DELAY_SECONDS", 2.0)
+        mail_module.SETTLE_DELAY_SECONDS = 0
+        ref = self.make_message("<nil-header-persistent@example.test>")
+        self.server.nil_header_fetches = 99
+
+        with self.assertRaises(MailError) as caught:
+            self.client.read_message(ref)
+
+        self.assertEqual(caught.exception.code, "message_unavailable")
+        self.assertFalse(caught.exception.uncertain)
+
     def test_move_with_uninspectable_source_is_uncertain(self):
         ref = self.make_message("<move-source-fetch-no@example.test>")
         self.server.move_failure = "both_present_source_fetch_no"
@@ -264,6 +304,16 @@ class MailClientTests(unittest.TestCase):
         with self.assertRaises(MailError) as caught:
             self.client.set_label(ref, "\\Seen", True)
         self.assertEqual(caught.exception.code, "invalid_label")
+
+    def test_keyword_dropped_by_server_is_reported_as_unsupported(self):
+        ref = self.make_message("<label-dropped@example.test>")
+        self.server.ignored_keyword_stores = True
+
+        with self.assertRaises(MailError) as caught:
+            self.client.set_label(ref, "Project_Review", True)
+
+        self.assertEqual(caught.exception.code, "label_unsupported")
+        self.assertFalse(caught.exception.uncertain)
 
     def test_trash_junk_spam_aliases_are_blocked(self):
         ref = self.make_message("<blocked@example.test>")

@@ -143,10 +143,11 @@ Selected mail content returned through MCP enters the calling model's context. E
 | Limit | Behavior |
 |---|---|
 | Hydroxide IMAP maturity | Upstream documents IMAP as work in progress |
-| Folders and labels | Existing mailboxes/keywords only; no creation, rename or deletion |
+| Folders and labels | Existing mailboxes/keywords only; no creation, rename or deletion. A server that accepts a keyword store without keeping it yields `label_unsupported` |
 | Replies and attachments | Plain-text composition; no reply-thread placement guarantee or attachment upload |
 | Partial MOVE | Inspect source and destination; never emulate with COPY and deletion flags |
 | Draft append or SMTP timeout | Report unknown outcome; never automatically retry |
+| Local sync lag | A read or draft check waits up to 12 s for Hydroxide to index the message, then reports `message_unavailable` or `draft_uncertain` |
 | Restart during an approved effect | Record unknown outcome; do not execute that action again |
 | Authentication refresh failure | Reauthenticate Hydroxide interactively; do not weaken 2FA |
 | Background processing | No scheduled mailbox activity |

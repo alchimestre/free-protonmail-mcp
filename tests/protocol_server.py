@@ -203,10 +203,17 @@ class _IMAPHandler(socketserver.StreamRequestHandler):
         self.server.fixture.record_body_fetch(selector)
         parsed = BytesParser(policy=policy.default).parsebytes(stored.raw)
         upper_selector = selector.upper()
-        if upper_selector.startswith("HEADER.FIELDS"):
-            names_match = re.search(r"\(([^)]*)\)", selector)
-            names = names_match.group(1).split() if names_match else []
-            header = _selected_headers(stored.raw, names)
+        if upper_selector.startswith("HEADER"):
+            if self.server.fixture.nil_header_fetches > 0:
+                self.server.fixture.nil_header_fetches -= 1
+                self._send(f"* {stored.uid} FETCH (UID {stored.uid} BODY[{selector}] NIL)")
+                return
+            if upper_selector == "HEADER":
+                header = stored.raw.partition(b"\r\n\r\n")[0] + b"\r\n\r\n"
+            else:
+                names_match = re.search(r"\(([^)]*)\)", selector)
+                names = names_match.group(1).split() if names_match else []
+                header = _selected_headers(stored.raw, names)
             descriptor = f"BODY[{selector}]"
         else:
             body = _body_for_section(parsed, selector)
@@ -233,6 +240,8 @@ class _IMAPHandler(socketserver.StreamRequestHandler):
         mailbox = getattr(self, "selected_mailbox", "INBOX")
         stored = self.server.fixture.find_message(mailbox, uid)
         if stored is not None:
+            if self.server.fixture.ignored_keyword_stores:
+                flags = [flag for flag in flags if flag.startswith("\\")]
             if operation == "+":
                 stored.flags.update(flags)
             else:
@@ -603,6 +612,8 @@ class LocalMailProtocolServer:
         self.body_fetch_sections = set()
         self.move_failure = None
         self.fetch_failure_mailbox = None
+        self.nil_header_fetches = 0
+        self.ignored_keyword_stores = False
         self.disconnect_after_append = False
         self.move_commands = 0
         self.refused_recipients = set()

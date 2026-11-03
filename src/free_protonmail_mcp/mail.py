@@ -5,6 +5,7 @@ import json
 import quopri
 import re
 import smtplib
+import time
 import uuid
 from contextlib import contextmanager
 from email import policy
@@ -35,6 +36,14 @@ MAX_SEARCH_RESULTS = 100
 MAX_HEADER_BYTES = 65536
 MAX_TEXT_BYTES = 131072
 MAX_PREVIEW_CHARS = 512
+DRAFT_SCAN_LIMIT = 5
+HEADER_FETCH_ITEMS = (
+    "(BODY.PEEK[HEADER.FIELDS ({fields})]<0.{limit}>)",
+    "(BODY.PEEK[HEADER]<0.{limit}>)",
+    "(RFC822.HEADER)",
+)
+SETTLE_ATTEMPTS = 7
+SETTLE_DELAY_SECONDS = 2.0
 SYSTEM_FLAGS = {
     "\\answered",
     "\\deleted",
@@ -308,13 +317,23 @@ class MailClient:
 
     def _fetch_header(self, connection, uid):
         fields = "SUBJECT FROM TO CC BCC DATE MESSAGE-ID"
-        item = f"(BODY.PEEK[HEADER.FIELDS ({fields})]<0.{MAX_HEADER_BYTES})"
-        status, response = connection.uid("FETCH", str(uid), item)
-        self._check_status(status, "message header fetch")
-        literal = _response_literal(response)
-        if literal is None:
-            raise MailError("message_not_found", "The referenced message headers are not present.")
-        return BytesParser(policy=policy.default).parsebytes(literal[:MAX_HEADER_BYTES])
+        for attempt in range(SETTLE_ATTEMPTS):
+            for template in HEADER_FETCH_ITEMS:
+                item = template.format(fields=fields, limit=MAX_HEADER_BYTES)
+                status, response = connection.uid("FETCH", str(uid), item)
+                self._check_status(status, "message header fetch")
+                literal = _response_literal(response)
+                if literal is not None:
+                    return BytesParser(policy=policy.default).parsebytes(literal[:MAX_HEADER_BYTES])
+            if attempt + 1 < SETTLE_ATTEMPTS:
+                time.sleep(SETTLE_DELAY_SECONDS)
+        # Hydroxide answers NIL for a section it cannot produce yet, so the message
+        # exists but its headers are not readable; do not report it as missing.
+        raise MailError(
+            "message_unavailable",
+            "The local IMAP server did not return this message's headers; "
+            "the mailbox may still be syncing. Retry the read.",
+        )
 
     def _read_text_parts(self, connection, uid, parts, text_limit=MAX_TEXT_BYTES):
         attachments = [_attachment_metadata(part) for part in parts if part.attachment]
@@ -384,6 +403,12 @@ class MailClient:
             ) from error
         is_present = flag.casefold() in {value.casefold() for value in current_flags}
         if is_present != present:
+            if store_succeeded and is_present == initially_present:
+                raise MailError(
+                    "label_unsupported",
+                    "The local IMAP server accepted the keyword but did not store it; "
+                    "labels cannot be changed on this server.",
+                )
             raise MailError(
                 "mutation_failed",
                 "The requested flag state was not verified.",
@@ -587,11 +612,10 @@ class MailClient:
         draft_mailbox = self._draft_mailbox()
         mime_bytes = mime_message.as_bytes(policy=policy.SMTP)
         self._append_draft(draft_mailbox, mime_bytes)
-        reference = self._find_appended_draft(draft_mailbox, draft_id)
-        self._verify_draft(reference, draft_id, message, len(mime_bytes))
+        reference = self._find_appended_draft(draft_mailbox, message, len(mime_bytes))
         return {
             "ref": reference.model_dump(mode="json"),
-            "message_id": draft_id,
+            "message_id": reference.message_id,
             "draft": True,
             "verified": True,
         }
@@ -626,58 +650,68 @@ class MailClient:
             if not append_attempted:
                 raise
 
-    def _find_appended_draft(self, draft_mailbox, draft_id):
-        try:
-            matches = self._inspect_message_refs(draft_mailbox, draft_id)
-        except MailError as error:
-            raise MailError(
-                "draft_uncertain",
-                "The draft could not be inspected after APPEND; "
-                "no retry or deletion was attempted.",
-                uncertain=True,
-            ) from error
-        if len(matches) != 1:
-            raise MailError(
-                "draft_uncertain",
-                "The appended draft could not be identified exactly once; "
-                "no retry or deletion was attempted.",
-                {"matching_messages": len(matches)},
-                uncertain=True,
-            )
-        return matches[0]
-
-    def _verify_draft(self, reference, draft_id, message, text_limit):
-        try:
-            verified = self._read_message(reference, text_limit)
-        except MailError as error:
-            raise MailError(
-                "draft_uncertain",
-                "The appended draft could not be read back; no retry or deletion was attempted.",
-                uncertain=True,
-            ) from error
-        recipients = _header_addresses_from_result(verified)
-        expected_to = {value.casefold() for value in message.to}
-        expected_cc = {value.casefold() for value in message.cc}
-        expected_bcc = {value.casefold() for value in message.bcc}
-        actual_body = verified["body"].replace("\r\n", "\n").replace("\r", "\n")
-        draft_flag = "\\draft" in {flag.casefold() for flag in verified["flags"]}
-        valid = (
-            verified["message_id"] == draft_id
-            and verified["subject"] == message.subject
-            and {value.casefold() for value in recipients["to"]} == expected_to
-            and {value.casefold() for value in recipients["cc"]} == expected_cc
-            and {value.casefold() for value in recipients["bcc"]} == expected_bcc
-            and actual_body == _expected_body(message.body)
-            and draft_flag
+    def _find_appended_draft(self, draft_mailbox, message, text_limit):
+        for attempt in range(SETTLE_ATTEMPTS):
+            try:
+                matches = self._match_recent_drafts(draft_mailbox, message, text_limit)
+            except MailError as error:
+                if error.code != "message_unavailable":
+                    raise self._draft_inspection_error() from error
+                matches = []
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                raise MailError(
+                    "draft_uncertain",
+                    "The appended draft could not be identified exactly once; "
+                    "no retry or deletion was attempted.",
+                    {"matching_messages": len(matches)},
+                    uncertain=True,
+                )
+            if attempt + 1 == SETTLE_ATTEMPTS:
+                break
+            time.sleep(SETTLE_DELAY_SECONDS)
+        raise MailError(
+            "draft_uncertain",
+            "The appended draft could not be identified exactly once; "
+            "no retry or deletion was attempted.",
+            {"matching_messages": 0},
+            uncertain=True,
         )
-        if not valid:
-            raise MailError(
-                "draft_uncertain",
-                "The appended draft did not match the requested content; "
-                "no retry or deletion was attempted.",
-                {"verified": False},
-                uncertain=True,
-            )
+
+    def _match_recent_drafts(self, draft_mailbox, message, text_limit):
+        with self._imap() as connection:
+            uid_validity = self._select(connection, draft_mailbox, readonly=True)
+            status, response = connection.uid("SEARCH", "ALL")
+            self._check_status(status, "draft listing")
+            recent_uids = _search_uids(response)[-DRAFT_SCAN_LIMIT:]
+            matches = []
+            for uid in recent_uids:
+                try:
+                    reference, header, _ = self._read_reference(
+                        connection,
+                        draft_mailbox,
+                        uid_validity,
+                        uid,
+                        None,
+                        False,
+                    )
+                    if not _draft_headers_match(header, message):
+                        continue
+                    if _draft_matches(self._read_message(reference, text_limit), message):
+                        matches.append(reference)
+                except MailError as error:
+                    if error.code == "message_unavailable":
+                        raise
+            return matches
+
+    @staticmethod
+    def _draft_inspection_error():
+        return MailError(
+            "draft_uncertain",
+            "The draft could not be inspected after APPEND; no retry or deletion was attempted.",
+            uncertain=True,
+        )
 
     def _inspect_message_refs(self, mailbox, message_id):
         with self._imap() as connection:
@@ -895,6 +929,35 @@ def _header_addresses(header, name):
 
 def _header_addresses_from_result(message):
     return {name: list(message.get(name, [])) for name in ("to", "cc", "bcc")}
+
+
+def _draft_headers_match(header, message):
+    if safe_text(header.get("Subject") or "") != message.subject:
+        return False
+    return all(
+        {value.casefold() for value in _header_addresses(header, name)}
+        == {value.casefold() for value in getattr(message, name)}
+        for name in ("to", "cc", "bcc")
+    )
+
+
+def _draft_matches(verified, message):
+    recipients = _header_addresses_from_result(verified)
+    actual_body = verified["body"].replace("\r\n", "\n").replace("\r", "\n")
+    draft_flag = "\\draft" in {flag.casefold() for flag in verified["flags"]}
+    expected_recipients = {
+        name: {value.casefold() for value in getattr(message, name)} for name in ("to", "cc", "bcc")
+    }
+    return (
+        verified["subject"] == message.subject
+        and all(
+            {value.casefold() for value in recipients[name]} == expected_recipients[name]
+            for name in ("to", "cc", "bcc")
+        )
+        # Proton re-serialises the draft and drops the trailing newline it received.
+        and actual_body.rstrip("\n") == _expected_body(message.body).rstrip("\n")
+        and draft_flag
+    )
 
 
 def _attachment_metadata(part: BodyPart):
