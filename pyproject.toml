@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling==1.33.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "free-protonmail-mcp"
+version = "0.1.0"
+description = "Local MCP tools for free Proton Mail accounts through Hydroxide"
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = [
+  "mcp==2.3.0",
+  "pydantic==2.14.2",
+  "keyring==25.7.0",
+  "platformdirs==4.14.3",
+  "filelock==4.2.7",
+]
+
+[project.scripts]
+free-protonmail-mcp = "free_protonmail_mcp.__main__:main"
+
+[dependency-groups]
+dev = ["ruff==0.17.3", "pip-audit==2.10.1", "coverage==7.17.1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/free_protonmail_mcp"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]

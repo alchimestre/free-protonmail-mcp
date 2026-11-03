@@ -1,0 +1,8 @@
+{
+  "username": "your-proton-username",
+  "sender": "your-address@proton.me",
+  "host": "127.0.0.1",
+  "imap_port": 1143,
+  "smtp_port": 1025,
+  "timeout": 30
+}
