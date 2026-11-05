@@ -36,7 +36,13 @@ Use `uv run` without activation if shell policy blocks activation.
 
 ## Connect Hydroxide
 
-1. Install Hydroxide from [Codeberg](https://codeberg.org/emersion/hydroxide). Reference source revision: `02b3b6c8aff726d2404b6ed5f6ba1b7937e1f30e`.
+1. Install Hydroxide from [Codeberg](https://codeberg.org/emersion/hydroxide). Reference source revision: `02b3b6c8aff726d2404b6ed5f6ba1b7937e1f30e`. Keep the built binary outside temporary directories, and invoke it by absolute path; a shell variable from one terminal does not survive into the next.
+
+```sh
+git clone https://codeberg.org/emersion/hydroxide.git
+git -C hydroxide checkout --detach 02b3b6c8aff726d2404b6ed5f6ba1b7937e1f30e
+cd hydroxide && go build -mod=readonly -o ~/.local/bin/hydroxide ./cmd/hydroxide
+```
 2. Authenticate in a private terminal. Enter Proton passwords, verification challenges and two-factor codes there. Keep the generated Hydroxide password private.
 
 ```sh
@@ -49,13 +55,36 @@ hydroxide auth USERNAME
 hydroxide -imap-host 127.0.0.1 -imap-port 1143 imap
 ```
 
-4. Run account setup in a separate, unrecorded terminal. Verify the primary sender in Proton before accepting it.
+4. Store the account settings and the Hydroxide password. Choose one path:
 
 ```sh
 uv run --frozen free-protonmail-mcp setup
 ```
 
-5. Start loopback SMTP in another terminal only when sending is wanted.
+The interactive form prompts for missing values, hides the username, sender and password, and requires a terminal check that fails when input or output is redirected.
+
+```sh
+uv run --frozen free-protonmail-mcp setup --username USERNAME --sender ADDRESS --credential-stdin
+```
+
+The non-interactive form reads the Hydroxide password from standard input and defaults the loopback address and ports. Use it when a script or agent runs setup; pipe the password, never pass it as an argument.
+
+| `setup` option | Effect |
+|---|---|
+| `--username`, `--sender` | Account identity; a terminal is required for any value not supplied |
+| `--host`, `--imap-port`, `--smtp-port` | Override the `127.0.0.1`, `1143`, `1025` defaults |
+| `--credential-stdin` | Read the Hydroxide password from standard input instead of a hidden prompt |
+| `--replace` | Replace an existing configuration or credential; without it both are kept |
+
+5. Confirm the bridge from the same shell that will start the server.
+
+```sh
+uv run --frozen free-protonmail-mcp doctor
+```
+
+`doctor` prints one line per check and exits nonzero on failure: configuration file, stored credential, IMAP login and advertised capabilities. It never contacts SMTP and prints no secret. The lines name the failing code, so `FAIL imap imap_unavailable {"endpoint": "127.0.0.1:1143", "reason": "connection_refused"}` means the listener is not running, not that the credential is wrong.
+
+6. Start loopback SMTP in another terminal only when sending is wanted.
 
 ```sh
 hydroxide -smtp-host 127.0.0.1 -smtp-port 1025 smtp
@@ -82,7 +111,8 @@ The server inherits the launching environment. On Linux that must include the us
 
 | Command | Effect |
 |---|---|
-| `free-protonmail-mcp setup` | Prompt privately; save account settings and native-store credential |
+| `free-protonmail-mcp setup` | Save account settings and the native-store credential |
+| `free-protonmail-mcp doctor` | Report configuration, credential and live IMAP state; no SMTP |
 | `free-protonmail-mcp serve` | Start stdio MCP and an authenticated loopback approval endpoint |
 | `free-protonmail-mcp approve ACTION_ID` | Display the complete frozen action and ask for an interactive decision |
 | `free-protonmail-mcp --config FILE serve` | Use another account configuration and isolated action state |
@@ -123,7 +153,7 @@ Use [the host-neutral mail skill](skills/proton-mail/SKILL.md) with a host-enfor
 | Action IDs, payload digests and outcomes | SQLite in the platform-standard user state directory |
 | Mailbox mirror, message bodies, raw protocol logs | Not retained |
 
-Setup requires an unrecorded interactive terminal and refuses redirected input/output. Credentials never belong in command arguments, environment variables, repository files or MCP arguments. Configuration and action-state paths come from `platformdirs`; custom configuration paths isolate action state.
+Hydroxide's own `auth` command needs a human terminal for the Proton password, verification challenge and two-factor code; nothing else in this project does. Setup needs a terminal only for values not supplied as options and for the hidden password prompt. Credentials never belong in command arguments, environment variables, repository files or MCP arguments. Configuration and action-state paths come from `platformdirs`; custom configuration paths isolate action state.
 
 Only native `keyring` backends are accepted. Plaintext, null, third-party and chained fallback backends are refused. Select a native backend in the `keyring` configuration when automatic selection chooses a chain. Use `uv run --frozen python -m keyring diagnose` to locate its configuration.
 
