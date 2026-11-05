@@ -56,6 +56,18 @@ PROTECTED_MAILBOX_NAMES = {"trash", "junk", "spam"}
 PROTECTED_MAILBOX_ATTRIBUTES = {"\\trash", "\\junk", "\\spam"}
 
 
+def _transport_reason(error, connected):
+    if connected:
+        return "connection_lost"
+    if isinstance(error, ConnectionRefusedError):
+        return "connection_refused"
+    if isinstance(error, TimeoutError):
+        return "timed_out"
+    if isinstance(error, imaplib.IMAP4.error):
+        return "protocol_error"
+    return "network_error"
+
+
 class MailClient:
     def __init__(self, config: AccountConfig, password):
         self.config = config
@@ -64,6 +76,8 @@ class MailClient:
     @contextmanager
     def _imap(self):
         connection = None
+        connected = False
+        endpoint = f"{self.config.host}:{self.config.imap_port}"
         try:
             connection = imaplib.IMAP4(
                 self.config.host,
@@ -81,6 +95,7 @@ class MailClient:
                 connection.login(self.config.username, password)
             except (imaplib.IMAP4.error, OSError, TimeoutError) as error:
                 raise MailError("authentication_failed", "IMAP authentication failed.") from error
+            connected = True
             yield connection
         except MailError:
             raise
@@ -88,6 +103,7 @@ class MailClient:
             raise MailError(
                 "imap_unavailable",
                 "The local IMAP service did not complete the operation.",
+                {"endpoint": endpoint, "reason": _transport_reason(error, connected)},
             ) from error
         finally:
             if connection is not None:

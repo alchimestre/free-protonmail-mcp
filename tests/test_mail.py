@@ -1,5 +1,7 @@
 import email
+import socket
 import unittest
+import unittest.mock
 from email.message import EmailMessage
 from email.policy import SMTP
 
@@ -57,6 +59,35 @@ class MailClientTests(unittest.TestCase):
         self.assertNotIn("wrong-secret", str(caught.exception))
         self.assertNotIn("bridge-secret", str(caught.exception))
         self.assertEqual(self.server.smtp_connections, 0)
+
+    def test_unreachable_bridge_names_the_endpoint(self):
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        closed_port = probe.getsockname()[1]
+        probe.close()
+        config = self.config.model_copy(update={"imap_port": closed_port})
+        client = MailClient(config, lambda: "bridge-secret")
+
+        with self.assertRaises(MailError) as caught:
+            client.health()
+
+        result = caught.exception.result()
+        self.assertEqual(result["error"]["code"], "imap_unavailable")
+        self.assertEqual(result["error"]["details"]["reason"], "connection_refused")
+        self.assertEqual(result["error"]["details"]["endpoint"], f"127.0.0.1:{closed_port}")
+        self.assertFalse(result["uncertain"])
+
+    def test_transport_loss_after_connect_is_distinguished_from_no_connection(self):
+        def reset(status, operation):
+            raise ConnectionResetError("peer reset")
+
+        with unittest.mock.patch.object(MailClient, "_check_status", staticmethod(reset)):
+            with self.assertRaises(MailError) as caught:
+                self.client.list_mailboxes()
+
+        details = caught.exception.result()["error"]["details"]
+        self.assertEqual(details["reason"], "connection_lost")
+        self.assertFalse(caught.exception.result()["uncertain"])
 
     def test_ref_identity_mismatch_prevents_flag_change(self):
         original = self.make_message("<fixture-1@example.test>", flags=("\\Seen",))

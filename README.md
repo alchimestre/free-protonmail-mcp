@@ -149,6 +149,7 @@ Selected mail content returned through MCP enters the calling model's context. E
 | Draft append or SMTP timeout | Report unknown outcome; never automatically retry |
 | Local sync lag | A read or draft check waits up to 12 s for Hydroxide to index the message, then reports `message_unavailable` or `draft_uncertain` |
 | Restart during an approved effect | Record unknown outcome; do not execute that action again |
+| Hydroxide IMAP not running | Mail tools fail with `imap_unavailable` and details `endpoint` and `reason` (`connection_refused`, `timed_out`, `connection_lost`, `protocol_error`, `network_error`) |
 | Authentication refresh failure | Reauthenticate Hydroxide interactively; do not weaken 2FA |
 | Background processing | No scheduled mailbox activity |
 
