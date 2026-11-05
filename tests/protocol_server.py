@@ -88,6 +88,7 @@ class _IMAPHandler(socketserver.StreamRequestHandler):
             self._send(f"{tag} NO no such mailbox")
             return
         self.selected_mailbox = mailbox
+        fixture.select_calls += 1
         attrs = " ".join(fixture.permanent_flags(mailbox))
         messages = fixture.message_snapshot(mailbox)
         uidvalidity = fixture.uid_validity_for(mailbox)
@@ -616,6 +617,7 @@ class LocalMailProtocolServer:
         self.ignored_keyword_stores = False
         self.disconnect_after_append = False
         self.move_commands = 0
+        self.select_calls = 0
         self.refused_recipients = set()
         self.disconnect_after_data = False
         self.smtp_connections = 0

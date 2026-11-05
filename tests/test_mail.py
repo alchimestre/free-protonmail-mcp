@@ -321,6 +321,30 @@ class MailClientTests(unittest.TestCase):
             result = self.client.search(mailbox, SearchQuery(subject=subject))
             self.assertEqual(result["messages"][0]["subject"], subject)
 
+    def test_describe_headers_reuses_one_connection_across_mailboxes(self):
+        inbox_ref = self.make_message("<preview-inbox@example.test>", subject="Inbox preview")
+        message = EmailMessage(policy=SMTP)
+        message["From"] = "sender@example.test"
+        message["To"] = "account@example.test"
+        message["Subject"] = "Archive preview"
+        message["Message-ID"] = "<preview-archive@example.test>"
+        message.set_content("Archive fixture.")
+        archive_uid = self.server.add_message("Archive", message.as_bytes())
+        archive_ref = MessageRef(
+            mailbox="Archive",
+            uid_validity=self.server.uid_validity_for("Archive"),
+            uid=archive_uid,
+            message_id="<preview-archive@example.test>",
+        )
+
+        previews = self.client.describe_headers([inbox_ref, archive_ref, inbox_ref])
+
+        self.assertEqual(
+            [preview["subject"] for preview in previews],
+            ["Inbox preview", "Archive preview", "Inbox preview"],
+        )
+        self.assertEqual(self.server.select_calls, 3)
+
     def test_custom_label_discovery_and_restoration(self):
         ref = self.make_message("<label@example.test>")
 

@@ -161,7 +161,7 @@ def register_actions(
         identities = {(item.mailbox, item.uid_validity, item.uid) for item in messages}
         if len(identities) != len(messages):
             raise MailError("DUPLICATE_MESSAGE", "Select each target message only once")
-        previews = [mail.describe(message) for message in messages]
+        previews = mail.describe_headers(messages)
         return manager.request("trash", {"messages": references, "previews": previews})
 
     @server.tool(annotations=READ_ONLY)
@@ -185,9 +185,9 @@ def execute(
 
 def execute_trash(mail: MailClient, payload: dict) -> dict[str, object]:
     messages = [MessageRef.model_validate(reference) for reference in payload["messages"]]
-    for message, preview in zip(messages, payload["previews"], strict=True):
-        if mail.describe(message) != preview:
-            raise MailError("CHANGED_MESSAGE", "A target changed; request a fresh Trash preview")
+    previews = mail.describe_headers(messages)
+    if previews != payload["previews"]:
+        raise MailError("CHANGED_MESSAGE", "A target changed; request a fresh Trash preview")
     completed = []
     for message in messages:
         try:

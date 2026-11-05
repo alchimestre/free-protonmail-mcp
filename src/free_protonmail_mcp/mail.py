@@ -35,7 +35,6 @@ from free_protonmail_mcp.models import (
 MAX_SEARCH_RESULTS = 100
 MAX_HEADER_BYTES = 65536
 MAX_TEXT_BYTES = 131072
-MAX_PREVIEW_CHARS = 512
 DRAFT_SCAN_LIMIT = 5
 HEADER_FETCH_ITEMS = (
     "(BODY.PEEK[HEADER.FIELDS ({fields})]<0.{limit}>)",
@@ -247,19 +246,36 @@ class MailClient:
         result.update({"body": body, "attachments": attachments, "truncated": truncated})
         return result
 
-    def describe(self, ref: MessageRef):
-        message = self.read_message(ref)
-        return {
-            "ref": message["ref"],
-            "message_id": message["message_id"],
-            "subject": message["subject"],
-            "from": message["from"],
-            "to": message["to"],
-            "date": message["date"],
-            "body_preview": message["body"][:MAX_PREVIEW_CHARS],
-            "attachments": message["attachments"],
-            "truncated": message["truncated"] or len(message["body"]) > MAX_PREVIEW_CHARS,
-        }
+    def describe_headers(self, refs):
+        previews = []
+        with self._imap() as connection:
+            selected = None
+            uid_validity = None
+            for ref in refs:
+                if ref.mailbox != selected:
+                    uid_validity = self._select(connection, ref.mailbox, readonly=True)
+                    selected = ref.mailbox
+                reference, header, metadata = self._read_reference(
+                    connection,
+                    ref.mailbox,
+                    uid_validity,
+                    ref.uid,
+                    ref.message_id,
+                    require_message_id=False,
+                    expected_uid_validity=ref.uid_validity,
+                )
+                message = _public_metadata(reference, header, metadata)
+                previews.append(
+                    {
+                        "ref": message["ref"],
+                        "message_id": message["message_id"],
+                        "subject": message["subject"],
+                        "from": message["from"],
+                        "to": message["to"],
+                        "date": message["date"],
+                    }
+                )
+        return previews
 
     def _read_reference(
         self,

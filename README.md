@@ -139,7 +139,7 @@ uv run --frozen free-protonmail-mcp approve ACTION_ID
 3. Type the displayed approval phrase to execute once, or deny it. Approval expires after 15 minutes.
 4. Check `action_status` before reporting success. Do not retry an unknown outcome with a new action ID.
 
-The send preview includes the configured sender, all To/Cc/Bcc recipients, subject and body. Trash approval identifies the exact messages and moves them to Trash; it never permanently deletes. Changed content or target references require a fresh approval. Sending a content snapshot retains any original draft.
+The send preview includes the configured sender, all To/Cc/Bcc recipients, subject and body. Trash approval identifies the exact messages and moves them to Trash; it never permanently deletes. Changed target references require a fresh approval. Sending a content snapshot retains any original draft.
 
 Use [the host-neutral mail skill](skills/proton-mail/SKILL.md) with a host-enforced MCP-only tool allowlist. Deny the mail agent shell, filesystem, GUI, browser, credential-store and approval-channel access. A same-user agent with unrestricted local access can operate a terminal approval flow; instructions do not provide OS isolation.
 
