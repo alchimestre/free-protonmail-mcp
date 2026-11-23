@@ -1,5 +1,4 @@
 import email
-import socket
 import unittest
 import unittest.mock
 from email.message import EmailMessage
@@ -60,21 +59,26 @@ class MailClientTests(unittest.TestCase):
         self.assertNotIn("bridge-secret", str(caught.exception))
         self.assertEqual(self.server.smtp_connections, 0)
 
-    def test_unreachable_bridge_names_the_endpoint(self):
-        probe = socket.socket()
-        probe.bind(("127.0.0.1", 0))
-        closed_port = probe.getsockname()[1]
-        probe.close()
-        config = self.config.model_copy(update={"imap_port": closed_port})
-        client = MailClient(config, lambda: "bridge-secret")
+    def test_login_transport_loss_is_not_an_authentication_failure(self):
+        with unittest.mock.patch("imaplib.IMAP4.login", side_effect=ConnectionResetError):
+            with self.assertRaises(MailError) as caught:
+                self.client.health()
 
-        with self.assertRaises(MailError) as caught:
-            client.health()
+        result = caught.exception.result()["error"]
+        self.assertEqual(result["code"], "imap_unavailable")
+        self.assertEqual(result["details"]["reason"], "connection_lost")
+
+    def test_unreachable_bridge_names_the_endpoint(self):
+        endpoint = f"{self.config.host}:{self.config.imap_port}"
+
+        with unittest.mock.patch("imaplib.IMAP4.open", side_effect=ConnectionRefusedError):
+            with self.assertRaises(MailError) as caught:
+                self.client.health()
 
         result = caught.exception.result()
         self.assertEqual(result["error"]["code"], "imap_unavailable")
         self.assertEqual(result["error"]["details"]["reason"], "connection_refused")
-        self.assertEqual(result["error"]["details"]["endpoint"], f"127.0.0.1:{closed_port}")
+        self.assertEqual(result["error"]["details"]["endpoint"], endpoint)
         self.assertFalse(result["uncertain"])
 
     def test_transport_loss_after_connect_is_distinguished_from_no_connection(self):
@@ -344,6 +348,7 @@ class MailClientTests(unittest.TestCase):
             ["Inbox preview", "Archive preview", "Inbox preview"],
         )
         self.assertEqual(self.server.select_calls, 3)
+        self.assertEqual(self.server.imap_connections, 1)
 
     def test_custom_label_discovery_and_restoration(self):
         ref = self.make_message("<label@example.test>")

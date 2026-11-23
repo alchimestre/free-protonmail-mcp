@@ -17,6 +17,7 @@ _MAX_REQUEST_BYTES = 64 * 1024
 _MAX_RESPONSE_BYTES = 1_100_000
 _CONNECTION_TIMEOUT_SECONDS = 5
 _REQUEST_TIMEOUT_SECONDS = 5
+_SHUTDOWN_POLL_SECONDS = 0.2
 _DISCOVERY_NAME = "approval-channel.json"
 _SECRET_PREFIX = "free-protonmail-mcp-approval-"
 _RESPONSE_FIELDS = {
@@ -104,7 +105,7 @@ class ApprovalChannel:
     def _start_listener(self) -> None:
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            listener.settimeout(0.2)
+            listener.settimeout(_SHUTDOWN_POLL_SECONDS)
             listener.bind(("127.0.0.1", 0))
             listener.listen(8)
             host, self.port = listener.getsockname()
@@ -152,7 +153,6 @@ class ApprovalChannel:
                 return
             try:
                 with connection:
-                    connection.settimeout(_CONNECTION_TIMEOUT_SECONDS)
                     response = self._handle_connection(connection, address)
                     connection.settimeout(_CONNECTION_TIMEOUT_SECONDS)
                     self._send_response(connection, response)
@@ -187,7 +187,7 @@ class ApprovalChannel:
             peer_address = ipaddress.ip_address(address[0])
             if not peer_address.is_loopback:
                 return _error_response("APPROVAL_CHANNEL_AUTH_FAILED", "Authentication failed")
-            request = _read_request(connection)
+            request = _read_request(connection, self._stop)
         except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
             return _error_response(
                 "APPROVAL_CHANNEL_INVALID_REQUEST", "Approval request is invalid"
@@ -423,15 +423,19 @@ def _client_request(
     return request
 
 
-def _read_request(connection: socket.socket) -> dict:
+def _read_request(connection: socket.socket, stop: threading.Event) -> dict:
     deadline = time.monotonic() + _REQUEST_TIMEOUT_SECONDS
     data = bytearray()
-    while len(data) <= _MAX_REQUEST_BYTES:
+    while not stop.is_set() and len(data) <= _MAX_REQUEST_BYTES:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise socket.timeout("Approval request deadline exceeded")
-        connection.settimeout(remaining)
-        chunk = connection.recv(min(4096, _MAX_REQUEST_BYTES + 1 - len(data)))
+        # Winsock shutdown does not always wake a timed recv on another thread.
+        connection.settimeout(min(remaining, _SHUTDOWN_POLL_SECONDS))
+        try:
+            chunk = connection.recv(min(4096, _MAX_REQUEST_BYTES + 1 - len(data)))
+        except TimeoutError:
+            continue
         if not chunk:
             raise ValueError("Request frame ended before newline")
         data.extend(chunk)
@@ -442,6 +446,8 @@ def _read_request(connection: socket.socket) -> dict:
             return json.loads(
                 data[:newline_index].decode("utf-8"), object_pairs_hook=_unique_object
             )
+    if stop.is_set():
+        raise OSError("Approval channel is stopping")
     raise ValueError("Request frame is too large")
 
 

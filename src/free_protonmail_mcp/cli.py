@@ -72,21 +72,31 @@ def dispatch(options, paths: Paths) -> int:
 
 def setup(paths: Paths, options) -> None:
     existing = paths.config_file.exists()
-    if existing and not options.replace:
+    keep_config = existing and not options.replace
+    if keep_config:
         account = load_account(paths.config_file)
-        print("PASS config: existing account kept; pass --replace to change it")
+        for field in ("username", "sender", "host", "imap_port", "smtp_port"):
+            supplied = getattr(options, field)
+            if supplied is not None and supplied != getattr(account, field):
+                raise MailError("CONFIG_EXISTS", "Pass --replace to change account settings")
     else:
         account = prompt_account(options)
-        save_account(paths.config_file, account, overwrite=existing)
-        print("PASS config: account saved")
 
     store = CredentialStore()
     name = mail_credential_name(account)
-    if store.get(name) is not None and not options.replace:
+    keep_credential = not options.replace and store.get(name) is not None
+    if not keep_credential:
+        store.set(name, read_credential(options))
+
+    if keep_config:
+        print("PASS config: existing account kept; pass --replace to change it")
+    else:
+        save_account(paths.config_file, account, overwrite=existing)
+        print("PASS config: account saved")
+    if keep_credential:
         print("PASS credential: existing native-store secret kept; pass --replace to change it")
-        return
-    store.set(name, read_credential(options))
-    print("PASS credential: Hydroxide password stored in the native credential store")
+    else:
+        print("PASS credential: Hydroxide password stored in the native credential store")
     print("Proton authentication and the Hydroxide listener remain external.")
 
 
@@ -109,29 +119,28 @@ def prompt_account(options) -> AccountConfig:
     for name in ("username", "sender"):
         if values[name] is not None:
             continue
-        if not sys.stdin.isatty():
-            raise MailError(
-                "PRIVATE_TERMINAL_REQUIRED",
-                f"Pass --{name} or run setup in an interactive terminal",
-            )
+        private_terminal()
         values[name] = getpass.getpass(labels[name] + " (hidden): ")
     for name, default in defaults.items():
         if values[name] is None:
             if not sys.stdin.isatty():
                 values[name] = default
             else:
+                private_terminal()
                 entered = input(f"{labels[name]} [{default}]: ")
                 values[name] = entered or default
     try:
-        account = AccountConfig(
-            username=values["username"],
-            sender=values["sender"],
-            host=values["host"],
-            imap_port=int(values["imap_port"]),
-            smtp_port=int(values["smtp_port"]),
-        )
+        imap_port = int(values["imap_port"])
+        smtp_port = int(values["smtp_port"])
     except (TypeError, ValueError):
         raise MailError("INVALID_PORT", "Ports must be integers from 1 to 65535") from None
+    account = AccountConfig(
+        username=values["username"],
+        sender=values["sender"],
+        host=values["host"],
+        imap_port=imap_port,
+        smtp_port=smtp_port,
+    )
     if options.sender is None:
         if input("Verify this is your primary sender in Proton. Type YES: ") != "YES":
             raise MailError("SETUP_CANCELLED", "Sender verification is required")

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 224" role="img" aria-labelledby="title desc">
+  <title id="title">Two paths into Proton Mail</title>
+  <desc id="desc">The MCP client connects to the local mail server. A separate terminal approves send and Trash requests. The server connects through Hydroxide to Proton Mail.</desc>
+  <style>
+    .card { fill: #f3efff; stroke: #7859bd; }
+    .approval { fill: #fff1d6; stroke: #a36916; }
+    .label { fill: #281d47; font: 600 20px system-ui, sans-serif; text-anchor: middle; }
+    .detail { fill: #534466; font: 15px system-ui, sans-serif; text-anchor: middle; }
+    .wire { fill: none; stroke: #8867d0; stroke-width: 3; }
+    .human { stroke: #b17925; stroke-dasharray: 5 4; }
+  </style>
+  <path class="wire" d="M136 68v21l144 16m-6-7 6 7-8 4m8 46v25h24m-7-6 7 6-7 6m110-6h24m-7-6 7 6-7 6"/>
+  <path class="wire human" d="M424 68v21l-144 16"/>
+  <rect class="card" x="24" y="8" width="224" height="60" rx="12"/>
+  <rect class="card approval" x="312" y="8" width="224" height="60" rx="12"/>
+  <rect class="card" x="168" y="105" width="224" height="50" rx="12"/>
+  <rect class="card" x="304" y="162" width="103" height="38" rx="10"/>
+  <rect class="card" x="431" y="162" width="121" height="38" rx="10"/>
+  <text class="label" x="136" y="35">MCP client</text>
+  <text class="detail" x="136" y="56">Find, organize, draft</text>
+  <text class="label" x="424" y="35">Private terminal</text>
+  <text class="detail" x="424" y="56">Approve send or Trash</text>
+  <text class="label" x="280" y="137">Local MCP server</text>
+  <text class="detail" x="355.5" y="186">Hydroxide</text>
+  <text class="detail" x="491.5" y="186">Proton Mail</text>
+</svg>

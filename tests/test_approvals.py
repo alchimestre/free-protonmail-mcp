@@ -214,6 +214,7 @@ class ApprovalManagerTests(ApprovalTestCase):
         self.assertNotIn("payload", request)
         self.assertTrue(request["action_id"])
         self.assertEqual(request["status"], "pending")
+        self.manager.close()
         self.assertFalse(
             any(
                 b"BODY_DO_NOT_PERSIST_3bb47e" in path.read_bytes()
@@ -612,7 +613,7 @@ class ApprovalChannelTests(ApprovalTestCase):
                     create=True,
                 ):
                     with self.assertRaises(socket.timeout):
-                        approval_channel_module._read_request(connection)
+                        approval_channel_module._read_request(connection, threading.Event())
 
     def test_shutdown_interrupts_idle_accepted_peer(self):
         with tempfile.TemporaryDirectory() as directory:

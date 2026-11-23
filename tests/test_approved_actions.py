@@ -7,12 +7,12 @@ from email.message import EmailMessage
 from pathlib import Path
 
 from mcp import Client
-from protocol_server import LocalMailProtocolServer
 
 from free_protonmail_mcp.approvals import ApprovalManager
 from free_protonmail_mcp.mail import MailClient
 from free_protonmail_mcp.models import AccountConfig, MailError
 from free_protonmail_mcp.server import build_server, execute
+from tests.protocol_server import LocalMailProtocolServer
 
 
 class ApprovedActionIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -109,7 +109,3 @@ class ApprovedActionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         result = await self.client.call_tool(tool, arguments)
         self.assertFalse(result.is_error, result.content)
         return result.structured_content
-
-
-if __name__ == "__main__":
-    unittest.main()

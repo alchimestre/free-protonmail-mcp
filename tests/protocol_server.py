@@ -27,6 +27,7 @@ class _ThreadingServer(socketserver.ThreadingTCPServer):
 
 class _IMAPHandler(socketserver.StreamRequestHandler):
     def handle(self):
+        self.server.fixture.record_imap_connection()
         self._send("* OK local protocol fixture ready")
         while True:
             line = self.rfile.readline()
@@ -618,6 +619,7 @@ class LocalMailProtocolServer:
         self.disconnect_after_append = False
         self.move_commands = 0
         self.select_calls = 0
+        self.imap_connections = 0
         self.refused_recipients = set()
         self.disconnect_after_data = False
         self.smtp_connections = 0
@@ -678,6 +680,10 @@ class LocalMailProtocolServer:
     def record_imap(self, command):
         with self._lock:
             self.imap_commands.append(command)
+
+    def record_imap_connection(self):
+        with self._lock:
+            self.imap_connections += 1
 
     def record_body_fetch(self, section):
         with self._lock:

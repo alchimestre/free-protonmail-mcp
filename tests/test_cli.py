@@ -84,6 +84,37 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("existing native-store secret kept", output)
         self.assertEqual(self.backend.set_password.call_count, 1)
 
+    def test_failed_replacement_preserves_existing_account(self):
+        self.run_command(self.account_arguments(), "bridge-secret\n")
+        original = self.config_file.read_bytes()
+        arguments = [*self.account_arguments(), "--replace", "--imap-port", "2143"]
+
+        code, _, errors = self.run_command(arguments)
+
+        self.assertEqual(code, 1)
+        self.assertIn("INVALID_CREDENTIAL", errors)
+        self.assertEqual(self.config_file.read_bytes(), original)
+        self.assertEqual(self.backend.set_password.call_count, 1)
+
+    def test_setup_rejects_conflicting_saved_account(self):
+        self.run_command(self.account_arguments(), "bridge-secret\n")
+        arguments = [*self.account_arguments(), "--username", "other@example.test"]
+
+        code, _, errors = self.run_command(arguments, "second-secret\n")
+
+        self.assertEqual(code, 1)
+        self.assertIn("CONFIG_EXISTS", errors)
+        self.assertEqual(self.backend.set_password.call_count, 1)
+
+    def test_setup_reports_invalid_host_as_invalid_input(self):
+        arguments = [*self.account_arguments(), "--host", "192.0.2.1"]
+
+        code, _, errors = self.run_command(arguments, "bridge-secret\n")
+
+        self.assertEqual(code, 1)
+        self.assertIn("INVALID_INPUT", errors)
+        self.backend.set_password.assert_not_called()
+
     def test_setup_without_sender_and_terminal_refuses_to_guess(self):
         arguments = [
             "setup",

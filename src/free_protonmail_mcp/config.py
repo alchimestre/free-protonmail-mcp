@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from platformdirs import user_config_path, user_state_path
-from pydantic import ValidationError
 
 from .models import AccountConfig, MailError
 
@@ -37,7 +36,7 @@ def load_account(path: Path) -> AccountConfig:
         raise MailError(
             "SETUP_REQUIRED", "Run setup in a private terminal before serving"
         ) from None
-    except (OSError, ValueError, ValidationError):
+    except (OSError, ValueError):
         raise MailError(
             "INVALID_CONFIG", "Account configuration is invalid or unreadable"
         ) from None

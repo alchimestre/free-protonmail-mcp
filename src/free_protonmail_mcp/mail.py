@@ -75,7 +75,6 @@ class MailClient:
     @contextmanager
     def _imap(self):
         connection = None
-        connected = False
         endpoint = f"{self.config.host}:{self.config.imap_port}"
         try:
             connection = imaplib.IMAP4(
@@ -92,9 +91,10 @@ class MailClient:
                 ) from error
             try:
                 connection.login(self.config.username, password)
-            except (imaplib.IMAP4.error, OSError, TimeoutError) as error:
+            except imaplib.IMAP4.abort:
+                raise
+            except imaplib.IMAP4.error as error:
                 raise MailError("authentication_failed", "IMAP authentication failed.") from error
-            connected = True
             yield connection
         except MailError:
             raise
@@ -102,7 +102,7 @@ class MailClient:
             raise MailError(
                 "imap_unavailable",
                 "The local IMAP service did not complete the operation.",
-                {"endpoint": endpoint, "reason": _transport_reason(error, connected)},
+                {"endpoint": endpoint, "reason": _transport_reason(error, connection is not None)},
             ) from error
         finally:
             if connection is not None:
@@ -744,26 +744,6 @@ class MailClient:
             "The draft could not be inspected after APPEND; no retry or deletion was attempted.",
             uncertain=True,
         )
-
-    def _inspect_message_refs(self, mailbox, message_id):
-        with self._imap() as connection:
-            uid_validity = self._select(connection, mailbox, readonly=True)
-            uids = self._search_message_id(connection, message_id)
-            references = []
-            for uid in uids:
-                try:
-                    reference, _, _ = self._read_reference(
-                        connection,
-                        mailbox,
-                        uid_validity,
-                        uid,
-                        message_id,
-                        require_message_id=True,
-                    )
-                except MailError:
-                    continue
-                references.append(reference)
-            return references
 
     def send(self, message: OutgoingMessage):
         message_id = _deterministic_message_id(self.config.sender, message)

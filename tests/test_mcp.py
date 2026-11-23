@@ -8,7 +8,8 @@ from pathlib import Path
 
 from mcp import Client
 from mcp.client.stdio import StdioServerParameters
-from protocol_server import LocalMailProtocolServer
+
+from tests.protocol_server import LocalMailProtocolServer
 
 
 class StdioMailTests(unittest.IsolatedAsyncioTestCase):
@@ -127,7 +128,3 @@ class StdioMailTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(body["body"].strip(), "MCP fixture body")
             self.assertEqual(self.protocol.smtp_data_attempts, 0)
             self.assertEqual(self.protocol.smtp_connections, 0)
-
-
-if __name__ == "__main__":
-    unittest.main()
